@@ -101,4 +101,198 @@ class ServiceabilityConfig:
                 raise ValueError(
                     f"{name} must be a non-negative number or null")
 
-    
+    @classmethod
+    def from_dict(cls, data: dict) -> ServiceabilityConfig:
+        # Keys starting with "_" are comments; anything else unknown is
+        # most likely a typo that would silently fall back to a default.
+        unknown_keys = sorted(k for k in data if not k.startswith("_")
+                              and k not in {f.name for f in fields(cls)})
+        if unknown_keys:
+            raise ValueError(f"unknown serviceability setting(s): "
+                             f"{unknown_keys}")
+
+        def pairs(key: str) -> set[tuple[str, str]]:
+            return {(str(a), str(b)) for a, b in data.get(key, [])}
+
+        def ids(values: list[str]) -> set[str]:
+            return {v.strip().upper() for v in values}
+
+        defaults = cls()
+        config = cls(
+            zones=list(data.get("zones", defaults.zones)),
+            zone_overrides={k.strip().upper(): v for k, v in
+                            data.get("zone_overrides", {}).items()},
+            allow_same_zone=bool(data.get("allow_same_zone", True)),
+            allowed_zone_pairs=(pairs("allowed_zone_pairs")
+                                if "allowed_zone_pairs" in data
+                                else defaults.allowed_zone_pairs),
+            allowed_pairs={(a.upper(), b.upper())
+                           for a, b in pairs("allowed_pairs")},
+            denied_pairs={(a.upper(), b.upper())
+                          for a, b in pairs("denied_pairs")},
+            disabled_restaurants=ids(data.get("disabled_restaurants", [])),
+            max_distance_km=data.get("max_distance_km",
+                                     defaults.max_distance_km),
+            max_time_min=data.get("max_time_min", defaults.max_time_min),
+            route_metric=data.get("route_metric", defaults.route_metric),
+        )
+        config.validate()
+        return config
+
+    @classmethod
+    def from_json(cls, path: str = DEFAULT_CONFIG_PATH
+                  ) -> ServiceabilityConfig:
+        with open(path, encoding="utf-8") as fh:
+            return cls.from_dict(json.load(fh))
+
+
+@dataclass(frozen=True)
+class ServiceabilityResult:
+    """Outcome of one serviceability check."""
+
+    restaurant_id: str
+    society_id: str
+    serviceable: bool
+    reason: Reason | None = None
+    message: str = ""
+    restaurant_zone: str | None = None
+    society_zone: str | None = None
+    distance_km: float | None = None
+    time_min: float | None = None
+    route: tuple[str, ...] = ()
+
+
+class ServiceabilityPolicy:
+    """Evaluates :class:`ServiceabilityConfig` against a graph.
+
+    Results are cached per pair; call :meth:`clear_cache` after the road
+    network changes (e.g. a road closure).
+    """
+
+    def __init__(self, graph: Graph,
+                 config: ServiceabilityConfig | None = None) -> None:
+        self.graph = graph
+        self.config = config or ServiceabilityConfig()
+        self._zone_pattern = re.compile(
+            r"\b(" + "|".join(map(re.escape, self.config.zones))
+            + r")\s+\d{6}\b", re.IGNORECASE)
+        self._cache: dict[tuple[str, str], ServiceabilityResult] = {}
+
+    @classmethod
+    def from_json(cls, graph: Graph, path: str = DEFAULT_CONFIG_PATH
+                  ) -> ServiceabilityPolicy:
+        return cls(graph, ServiceabilityConfig.from_json(path))
+
+    @classmethod
+    def default(cls, graph: Graph) -> ServiceabilityPolicy:
+        """Policy from ``config/serviceability.json``, or the built-in
+        defaults if that file is absent."""
+        if os.path.isfile(DEFAULT_CONFIG_PATH):
+            return cls.from_json(graph)
+        return cls(graph)
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
+
+    def zone_of(self, node_id: str) -> str | None:
+        """Configured zone of a location (override, else postal town)."""
+        if node_id in self.config.zone_overrides:
+            return self.config.zone_overrides[node_id]
+        location = self.graph.locations.get(node_id)
+        if location is None:
+            return None
+        match = self._zone_pattern.search(location.address)
+        if match is None:
+            return None
+        # Return the configured spelling of the zone.
+        found = match.group(1).lower()
+        return next(z for z in self.config.zones if z.lower() == found)
+
+    def check(self, restaurant_id: str, society_id: str
+              ) -> ServiceabilityResult:
+        key = (restaurant_id, society_id)
+        if key not in self._cache:
+            self._cache[key] = self._evaluate(restaurant_id, society_id)
+        return self._cache[key]
+
+    def is_serviceable(self, restaurant_id: str, society_id: str) -> bool:
+        return self.check(restaurant_id, society_id).serviceable
+
+    # ------------------------------------------------------------------
+
+    def _location(self, node_id: str, kind: str) -> Location | None:
+        location = self.graph.locations.get(node_id)
+        return location if location is not None and location.kind == kind \
+            else None
+
+    def _authorised(self, restaurant_id: str, society_id: str,
+                    r_zone: str | None, s_zone: str | None
+                    ) -> tuple[bool, str]:
+        pair = (restaurant_id, society_id)
+        cfg = self.config
+        if pair in cfg.denied_pairs:
+            return False, "pair is on the deny list"
+        if pair in cfg.allowed_pairs:
+            return True, ""
+        if r_zone is None or s_zone is None:
+            return False, "location has no configured service zone"
+        if r_zone == s_zone and cfg.allow_same_zone:
+            return True, ""
+        if (r_zone, s_zone) in cfg.allowed_zone_pairs:
+            return True, ""
+        return False, f"{r_zone} -> {s_zone} deliveries are not configured"
+
+    def _evaluate(self, restaurant_id: str, society_id: str
+                  ) -> ServiceabilityResult:
+        cfg = self.config
+
+        def reject(reason: Reason, message: str,
+                   **extra) -> ServiceabilityResult:
+            return ServiceabilityResult(restaurant_id, society_id, False,
+                                        reason, message, **extra)
+
+        restaurant = self._location(restaurant_id, "Restaurant")
+        society = self._location(society_id, "Society")
+        if restaurant is None or society is None:
+            bad = [f"{node_id} is not a known {kind.lower()}"
+                   for node_id, kind, loc in
+                   ((restaurant_id, "Restaurant", restaurant),
+                    (society_id, "Society", society)) if loc is None]
+            return reject(Reason.INVALID_RESTAURANT_OR_SOCIETY,
+                          "; ".join(bad))
+
+        if restaurant_id in cfg.disabled_restaurants:
+            return reject(Reason.RESTAURANT_NOT_ACCEPTING_ORDERS,
+                          f"{restaurant_id} is not accepting orders")
+
+        zones = {"restaurant_zone": self.zone_of(restaurant_id),
+                 "society_zone": self.zone_of(society_id)}
+        authorised, why = self._authorised(restaurant_id, society_id,
+                                           zones["restaurant_zone"],
+                                           zones["society_zone"])
+        if not authorised:
+            return reject(Reason.OUTSIDE_SERVICE_ZONE, why, **zones)
+
+        route = dijkstra(self.graph, restaurant_id, society_id,
+                         cfg.route_metric)
+        if not route.found:
+            return reject(Reason.NO_ROAD_ROUTE,
+                          f"no road route {restaurant_id} -> {society_id}",
+                          **zones)
+        measured = {**zones, "distance_km": route.total_distance_km,
+                    "time_min": route.total_time_min,
+                    "route": tuple(route.path)}
+
+        if (cfg.max_distance_km is not None
+                and route.total_distance_km > cfg.max_distance_km):
+            return reject(Reason.DELIVERY_DISTANCE_EXCEEDED,
+                          f"{route.total_distance_km:.2f} km > "
+                          f"{cfg.max_distance_km} km limit", **measured)
+        if (cfg.max_time_min is not None
+                and route.total_time_min > cfg.max_time_min):
+            return reject(Reason.DELIVERY_TIME_EXCEEDED,
+                          f"{route.total_time_min:.1f} min > "
+                          f"{cfg.max_time_min} min limit", **measured)
+
+        return ServiceabilityResult(restaurant_id, society_id, True,
+                                    message="serviceable", **measured)
