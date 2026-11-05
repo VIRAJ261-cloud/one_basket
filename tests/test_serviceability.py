@@ -216,3 +216,131 @@ class ConfigTests(unittest.TestCase):
                 ServiceabilityConfig.from_dict(bad)
 
 
+class RealDataTests(unittest.TestCase):
+    """Miraj -> Sangli example on the project's real dataset."""
+
+    def _miraj_to_sangli_within_limits(self, policy: ServiceabilityPolicy
+                                       ) -> tuple[str, str]:
+        graph = policy.graph
+        for r in sorted(graph.locations):
+            if (graph.locations[r].kind != "Restaurant"
+                    or policy.zone_of(r) != "Miraj"):
+                continue
+            for s in sorted(graph.locations):
+                if (graph.locations[s].kind == "Society"
+                        and policy.zone_of(s) == "Sangli"):
+                    route = dijkstra(graph, r, s)
+                    if (route.found and route.total_time_min <= 30
+                            and route.total_distance_km <= 8):
+                        return r, s
+        self.fail("no short Miraj -> Sangli pair in the dataset")
+
+    def test_miraj_restaurant_to_sangli_society_rejected(self) -> None:
+        policy = ServiceabilityPolicy.default(_real_graph())
+        restaurant, society = self._miraj_to_sangli_within_limits(policy)
+        result = policy.check(restaurant, society)
+        self.assertEqual(result.reason, Reason.OUTSIDE_SERVICE_ZONE)
+
+    def test_miraj_to_sangli_accepted_when_explicitly_allowed(self) -> None:
+        graph = _real_graph()
+        base = ServiceabilityPolicy.default(graph)
+        restaurant, society = self._miraj_to_sangli_within_limits(base)
+        config = ServiceabilityConfig.from_json()
+        config.allowed_pairs.add((restaurant, society))
+        self.assertTrue(ServiceabilityPolicy(graph, config)
+                        .is_serviceable(restaurant, society))
+
+    def test_simulation_only_generates_serviceable_orders(self) -> None:
+        sim = DeliverySimulation(_real_graph(), num_drivers=20,
+                                 num_orders=50, seed=42)
+        metrics = sim.run()
+        for order in sim.orders:
+            self.assertTrue(sim.serviceability.is_serviceable(
+                order.restaurant_id, order.society_id))
+        self.assertEqual(metrics.rejected_orders, 0)
+        self.assertEqual(metrics.delivered_orders, 50)
+
+    def test_reject_mode_keeps_unserviceable_orders_visible(self) -> None:
+        graph = _real_graph()
+        policy = ServiceabilityPolicy.default(graph)
+        orders = generate_orders(graph, 100, seed=42, serviceability=policy,
+                                 reject_unserviceable=True)
+        # Same demand as generation without a policy (all pairs routable).
+        plain = generate_orders(graph, 100, seed=42)
+        self.assertEqual([(o.restaurant_id, o.society_id) for o in orders],
+                         [(o.restaurant_id, o.society_id) for o in plain])
+        rejected = [o for o in orders if o.status is OrderStatus.REJECTED]
+        self.assertTrue(rejected)
+        for order in orders:
+            check = policy.check(order.restaurant_id, order.society_id)
+            if check.serviceable:
+                self.assertEqual(order.status, OrderStatus.PENDING)
+            else:
+                self.assertEqual(order.status, OrderStatus.REJECTED)
+                self.assertEqual(order.rejection_reason, check.reason.value)
+                self.assertTrue(order.rejection_message)
+
+    def test_reject_mode_simulation(self) -> None:
+        def run() -> DeliverySimulation:
+            sim = DeliverySimulation(_real_graph(), num_drivers=50,
+                                     num_orders=100, seed=42,
+                                     reject_unserviceable=True)
+            sim.run()
+            return sim
+
+        sim = run()
+        m = sim.metrics
+        self.assertEqual(m.total_orders, 100)
+        self.assertGreater(m.rejected_orders, 0)
+        self.assertEqual(m.delivered_orders + m.rejected_orders, 100)
+        for order in sim.orders:
+            if order.status is OrderStatus.REJECTED:
+                self.assertIsNone(order.assigned_driver)
+                self.assertFalse(order.pickup_route)
+        again = run().metrics
+        self.assertEqual(again.rejected_orders, m.rejected_orders)
+        self.assertAlmostEqual(again.total_distance_km, m.total_distance_km,
+                               places=6)
+
+
+class DispatchIntegrationTests(unittest.TestCase):
+    def test_generate_orders_respects_policy(self) -> None:
+        policy = _policy()
+        orders = generate_orders(policy.graph, 1, seed=3,
+                                 serviceability=policy)
+        self.assertEqual((orders[0].restaurant_id, orders[0].society_id),
+                         ("RS1", "SS1"))  # the only serviceable pair
+
+    def test_dispatch_rejects_unserviceable_order(self) -> None:
+        policy = _policy()
+        driver = Driver("D1", "SS1")
+        order = Order("O0001", "RM1", "SS1")
+        engine = DispatchEngine(policy.graph, algorithm="dijkstra",
+                                serviceability=policy)
+
+        delivered = engine.dispatch_order(order, [driver])
+
+        self.assertFalse(delivered)
+        self.assertEqual(order.status, OrderStatus.REJECTED)
+        self.assertEqual(order.rejection_reason, "OUTSIDE_SERVICE_ZONE")
+        self.assertIsNone(order.assigned_driver)
+        self.assertEqual(driver.status, DriverStatus.AVAILABLE)
+        self.assertEqual(driver.current_node, "SS1")
+
+    def test_dispatch_delivers_serviceable_order(self) -> None:
+        policy = _policy()
+        order = Order("O0001", "RS1", "SS1")
+        engine = DispatchEngine(policy.graph, algorithm="dijkstra",
+                                serviceability=policy)
+        self.assertTrue(engine.dispatch_order(order, [Driver("D1", "SS1")]))
+        self.assertEqual(order.status, OrderStatus.DELIVERED)
+
+    def test_rejected_order_is_terminal(self) -> None:
+        order = Order("O0001", "RM1", "SS1")
+        order.transition(OrderStatus.REJECTED)
+        with self.assertRaises(ValueError):
+            order.transition(OrderStatus.ASSIGNED)
+
+
+if __name__ == "__main__":
+    unittest.main()
