@@ -169,3 +169,50 @@ class ServiceabilityRuleTests(unittest.TestCase):
                          Reason.RESTAURANT_NOT_ACCEPTING_ORDERS)
 
 
+class ConfigTests(unittest.TestCase):
+    def test_from_dict(self) -> None:
+        config = ServiceabilityConfig.from_dict({
+            "allowed_zone_pairs": [["Miraj", "Sangli"]],
+            "allowed_pairs": [["rm1", "ss1"]],
+            "disabled_restaurants": ["rs1"],
+            "max_distance_km": None,
+            "max_time_min": 15,
+        })
+        self.assertEqual(config.allowed_zone_pairs, {("Miraj", "Sangli")})
+        self.assertEqual(config.allowed_pairs, {("RM1", "SS1")})
+        self.assertEqual(config.disabled_restaurants, {"RS1"})
+        self.assertIsNone(config.max_distance_km)
+        self.assertEqual(config.max_time_min, 15)
+
+    def test_shipped_config_file_loads(self) -> None:
+        config = ServiceabilityConfig.from_json()
+        self.assertEqual(set(config.zones), {"Sangli", "Miraj", "Kupwad"})
+        self.assertNotIn(("Miraj", "Sangli"), config.allowed_zone_pairs)
+
+    def test_shipped_config_matches_built_in_defaults(self) -> None:
+        # ServiceabilityPolicy(graph) and ServiceabilityPolicy.default(graph)
+        # must describe the same policy.
+        self.assertEqual(ServiceabilityConfig.from_json(),
+                         ServiceabilityConfig())
+
+    def test_unknown_setting_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ServiceabilityConfig.from_dict({"max_time_mins": 10})
+
+    def test_comment_keys_are_ignored(self) -> None:
+        ServiceabilityConfig.from_dict({"_comment": "synthetic"})
+
+    def test_unknown_zone_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ServiceabilityConfig.from_dict(
+                {"allowed_zone_pairs": [["sangli", "Miraj"]]})
+        with self.assertRaises(ValueError):
+            ServiceabilityConfig.from_dict({"zone_overrides": {"R1": "Pune"}})
+
+    def test_invalid_limits_and_metric_are_rejected(self) -> None:
+        for bad in ({"max_time_min": -1}, {"max_distance_km": "8"},
+                    {"route_metric": "cost"}):
+            with self.assertRaises(ValueError):
+                ServiceabilityConfig.from_dict(bad)
+
+
