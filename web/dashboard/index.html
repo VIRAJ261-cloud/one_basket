@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delivery Route Planner</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 17h2a2 2 0 1 0 4 0h4a2 2 0 1 0 4 0h2v-5l-3-4h-4V5H4v12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </span>
+        <div>
+          <div class="brand-name">Delivery Route Planner</div>
+          <div class="brand-sub">Sangli · Miraj · Kupwad</div>
+        </div>
+      </div>
+      <nav>
+        <a href="#dashboard" data-view="dashboard">Dashboard</a>
+        <a href="#orders" data-view="orders">Create orders <span class="nav-count" id="navOrders"></span></a>
+        <a href="#results" data-view="results">Route results <span class="nav-dot" id="navResult" hidden></span></a>
+        <a href="#closures" data-view="closures">Road closures</a>
+        <a href="#how" data-view="how">How it works</a>
+      </nav>
+      <div class="sidebar-foot">
+        <a href="/index.html">Algorithm visualizer ↗</a>
+        <a href="/planner.html">Advanced planner ↗</a>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Shown until the app starts: it only works when served by dashboard.py. -->
+      <div id="serverNotice" role="alert" style="background:#fef6e7;border:1px solid #fedf89;color:#7a4504;border-radius:10px;padding:14px 16px;margin-bottom:16px;font:15px/1.5 'Segoe UI',system-ui,sans-serif">
+        <b>The dashboard is not connected to its server.</b><br>
+        Start it from the project folder with <code>python dashboard.py</code>, then open
+        <a href="http://127.0.0.1:8060/">http://127.0.0.1:8060/</a> in your browser.
+        Opening <code>index.html</code> directly (or with another web server) cannot load the delivery data.
+      </div>
+      <div id="globalError" class="banner error" role="alert" hidden></div>
+
+      <!-- ============================================ Dashboard -->
+      <section id="view-dashboard" class="view" aria-labelledby="h-dashboard">
+        <header class="view-head">
+          <div>
+            <h1 id="h-dashboard">Dashboard</h1>
+            <p class="lead">Plan routes where one driver collects several food orders and delivers them in a sensible order.</p>
+          </div>
+          <a class="btn primary lg" href="#orders">Plan a Delivery Route</a>
+        </header>
+
+        <div class="stats" id="stats" aria-live="polite">
+          <div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h2>Current plan</h2>
+            <div id="planStatus" class="plan-status"></div>
+          </div>
+          <div class="card">
+            <h2>Delivery areas</h2>
+            <div id="areaRules" class="muted">Loading…</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Try an example</h2>
+          <p class="muted">Loads real restaurants and societies into the order form. The route is calculated when you press <b>Optimize Delivery Route</b>.</p>
+          <div class="examples" id="examples"></div>
+        </div>
+      </section>
+
+      <!-- ============================================ Orders -->
+      <section id="view-orders" class="view" aria-labelledby="h-orders" hidden>
+        <header class="view-head">
+          <div>
+            <h1 id="h-orders">Create delivery orders</h1>
+            <p class="lead">Pick where each order is collected and where it is delivered. The optimizer decides the stop order.</p>
+          </div>
+        </header>
+
+        <div class="grid-orders">
+          <div class="col">
+            <div class="card">
+              <h2>Add an order</h2>
+              <div class="form-row">
+                <label for="restaurantFilter">Restaurant <span class="muted">(pickup)</span></label>
+                <input id="restaurantFilter" type="search" placeholder="Search by name, area or ID…" autocomplete="off">
+                <select id="restaurantSelect" size="6" aria-label="Restaurant"></select>
+              </div>
+              <div class="form-row">
+                <label for="societySelect">Society <span class="muted">(delivery)</span></label>
+                <select id="societySelect"><option value="">Choose a society…</option></select>
+              </div>
+              <div id="pairCheck" class="pair-check" aria-live="polite"></div>
+              <div class="form-actions">
+                <button id="addOrderBtn" class="btn" type="button" disabled>+ Add order</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Drivers</h2>
+              <p class="muted small">Choose where each driver starts. The optimizer decides which driver takes which orders.</p>
+              <ol id="driverList" class="driver-list"></ol>
+              <div class="form-actions">
+                <button id="addDriverBtn" class="btn" type="button">+ Add driver</button>
+              </div>
+              <div class="form-row inline">
+                <label for="capacity">Each driver can carry up to</label>
+                <input id="capacity" type="number" min="1" max="10" value="3" inputmode="numeric">
+                <span>orders at once</span>
+              </div>
+              <details class="advanced">
+                <summary>Advanced settings</summary>
+                <div class="form-row">
+                  <label for="algorithm">Road search method</label>
+                  <select id="algorithm">
+                    <option value="dijkstra">Standard shortest path (Dijkstra)</option>
+                    <option value="astar">Guided search (A*)</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label for="maxRide">Max extra minutes food may spend in the vehicle</label>
+                  <input id="maxRide" type="number" min="0" step="1" value="20" placeholder="No limit">
+                </div>
+                <label class="toggle"><input id="enforceAreas" type="checkbox" checked> Apply delivery-area rules</label>
+              </details>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="card">
+              <div class="card-head">
+                <h2>Orders to plan <span class="muted" id="orderCount"></span></h2>
+                <button id="clearOrdersBtn" class="btn ghost sm" type="button">Clear all</button>
+              </div>
+              <div id="orderList"></div>
+              <div id="formErrors" class="banner error" role="alert" hidden></div>
+              <button id="optimizeBtn" class="btn primary lg block" type="button">Optimize Delivery Route</button>
+              <p class="muted small center" id="optimizeHint"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================ Results -->
+      <section id="view-results" class="view" aria-labelledby="h-results" hidden>
+        <header class="view-head">
+          <div>
+            <h1 id="h-results">Route results</h1>
+            <p class="lead" id="resultsLead">The optimized route calculated for your orders.</p>
+          </div>
+          <a class="btn" href="#orders">Edit orders</a>
+        </header>
+        <div id="resultsBody"></div>
+      </section>
+
+      <!-- ============================================ Closures -->
+      <section id="view-closures" class="view" aria-labelledby="h-closures" hidden>
+        <header class="view-head">
+          <div>
+            <h1 id="h-closures">Road closures</h1>
+            <p class="lead">Block a road and see how the drivers are re-routed.</p>
+          </div>
+        </header>
+        <div id="closuresBody"></div>
+      </section>
+
+      <!-- ============================================ How it works -->
+      <section id="view-how" class="view" aria-labelledby="h-how" hidden>
+        <header class="view-head">
+          <div>
+            <h1 id="h-how">How it works</h1>
+            <p class="lead">A short, non-technical tour of what happens when you press Optimize.</p>
+          </div>
+        </header>
+        <div class="how-grid">
+          <div class="card how"><h3>1 · Delivery-area check</h3>
+            <p>Each order is checked first: is this restaurant allowed to deliver to that society, and is the trip short enough? Orders that fail are listed with the reason and are never given to a driver.</p></div>
+          <div class="card how"><h3>2 · Shortest roads (Dijkstra / A*)</h3>
+            <p><b>Dijkstra</b> finds the quickest road path between two places by always extending the closest unexplored place first. <b>A*</b> finds the same path but uses the straight-line distance to the goal to search in the right direction first.</p></div>
+          <div class="card how"><h3>3 · Multi-stop optimizer</h3>
+            <p>Orders are added one at a time where they add the least extra driving, without breaking a rule: food is collected before it is delivered, a driver never carries more than their limit, and food does not ride around too long. Orders not yet collected may then move to a better driver.</p></div>
+          <div class="card how"><h3>4 · Simple route for comparison</h3>
+            <p>The "simple route" handles one order at a time: collect, deliver, then the next order. It uses the same drivers and rules, so the two plans can be compared fairly.</p></div>
+          <div class="card how"><h3>5 · Rerouting</h3>
+            <p>When a road is blocked, it is removed from the map. Drivers already on a road finish that stretch, then follow a new path. If a place can no longer be reached, the affected orders are reported instead of being marked delivered.</p></div>
+          <div class="card how"><h3>Good to know</h3>
+            <p>The optimized route is a good plan found by a fast method, not a guaranteed perfect one. Locations are placed by their real latitude/longitude, but roads are drawn as straight lines between connected places, not street shapes. Delivery-area rules and limits are project assumptions.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>
