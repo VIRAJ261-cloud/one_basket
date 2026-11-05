@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-Stop Planner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="planner">
+  <header class="topbar">
+    <div>
+      <h1>Food Delivery Route Optimizer <span class="sub">Multi-Stop Planner</span></h1>
+      <p id="graphInfo" class="muted">Loading the real graph&hellip;</p>
+      <p class="small"><a href="/">&larr; Dijkstra / A* search visualizer</a></p>
+    </div>
+  </header>
+
+  <div class="planner-grid">
+    <section class="card setup" aria-label="Scenario">
+      <h2>1. Orders</h2>
+      <p class="muted small">Each order goes from one restaurant to one society. Times are minutes from the start; leave blank for "ready now" / "no deadline".</p>
+      <table class="grid-table" id="ordersTable">
+        <thead><tr><th>#</th><th>Restaurant (pickup)</th><th>Society (drop-off)</th><th>Ready at</th><th>Deadline</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="btns">
+        <button type="button" id="addOrder">+ Add order</button>
+        <button type="button" id="loadExample">Load example</button>
+        <button type="button" id="clearAll">Clear</button>
+      </div>
+
+      <h2>2. Drivers</h2>
+      <table class="grid-table" id="driversTable">
+        <thead><tr><th>Driver</th><th>Start location</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="btns"><button type="button" id="addDriver">+ Add driver</button></div>
+
+      <h2>3. Settings</h2>
+      <div class="settings">
+        <label class="field"><span class="label">Shortest-path algorithm</span>
+          <select id="algorithm">
+            <option value="dijkstra">Dijkstra</option>
+            <option value="astar">A*</option>
+            <option value="tree">Precomputed (one Dijkstra tree per node)</option>
+          </select></label>
+        <label class="field"><span class="label">Optimise</span>
+          <select id="metric">
+            <option value="time">Travel time</option>
+            <option value="distance">Distance</option>
+          </select></label>
+        <label class="field"><span class="label">Driver capacity (orders)</span>
+          <input id="capacity" type="number" min="1" max="10" value="3"></label>
+        <label class="field"><span class="label">Max extra ride time (min)</span>
+          <input id="maxRide" type="number" min="0" step="1" value="20" placeholder="no limit"></label>
+        <label class="field"><span class="label">Local improvement</span>
+          <select id="improve">
+            <option value="relocate">Relocate between drivers</option>
+            <option value="intra">Within each driver only</option>
+            <option value="none">None (cheapest insertion only)</option>
+          </select></label>
+        <label class="check"><input id="serviceability" type="checkbox" checked> Enforce serviceability (config/serviceability.json)</label>
+      </div>
+
+      <h2>4. Road closures <span class="muted small">(optional)</span></h2>
+      <table class="grid-table" id="closuresTable">
+        <thead><tr><th>From</th><th>To</th><th>Close at</th><th>Reopen at</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="btns">
+        <button type="button" id="addClosure">+ Add closure</button>
+        <select id="routeRoads" disabled><option>Run once to list roads on the optimised route</option></select>
+        <button type="button" id="closeRouteRoad" disabled>Close this road</button>
+      </div>
+
+      <div class="run-row">
+        <button id="runBtn" class="primary" type="button">Run optimiser</button>
+        <span id="runInfo" class="muted small"></span>
+      </div>
+      <div id="error" class="error" role="alert" hidden></div>
+    </section>
+
+    <section class="results-col" aria-label="Results">
+      <div class="card" id="summary"><p class="muted">Add orders and drivers, then press <b>Run optimiser</b>.
+        Both the naive greedy baseline and the optimiser run on the server with the project's real graph.</p></div>
+      <div class="card map-card">
+        <div class="panel-head">
+          <div class="seg" role="radiogroup">
+            <label><input type="radio" name="method" value="insertion" checked> Optimised</label>
+            <label><input type="radio" name="method" value="append"> Naive greedy</label>
+          </div>
+          <span class="muted small">Scroll to zoom, drag to pan. Numbers = stop order; ▲ pickup, ■ drop-off; red dashes = closed road.</span>
+        </div>
+        <svg id="map" class="graph" role="img" aria-label="Driver routes on the delivery graph"></svg>
+        <div id="mapLegend" class="legend"></div>
+      </div>
+      <div class="card" id="routes"></div>
+      <div class="card" id="orders"></div>
+      <div class="card" id="reroutes" hidden></div>
+    </section>
+  </div>
+
+  <datalist id="restaurants"></datalist>
+  <datalist id="societies"></datalist>
+  <datalist id="allLocations"></datalist>
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="planner.js"></script>
+</body>
+</html>

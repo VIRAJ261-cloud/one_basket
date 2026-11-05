@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Route Search Visualizer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Food Delivery Route Optimizer <span class="sub">Search Visualizer</span></h1>
+      <p id="graphInfo" class="muted">Loading the real graph&hellip;</p>
+      <p class="small"><a href="/planner.html">Multi-stop planner (several orders, drivers, road closures) &rarr;</a></p>
+    </div>
+  </header>
+
+  <section class="card controls" aria-label="Search setup">
+    <div class="field">
+      <span class="label">Mode</span>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="mode" value="single" checked> Single algorithm</label>
+        <label><input type="radio" name="mode" value="compare"> Dijkstra vs A*</label>
+      </div>
+    </div>
+    <div class="field" id="algoField">
+      <span class="label">Algorithm</span>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="algo" value="dijkstra" checked> Dijkstra</label>
+        <label><input type="radio" name="algo" value="astar"> A*</label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="label" for="metric">Optimize</label>
+      <select id="metric">
+        <option value="time">Travel time (min)</option>
+        <option value="distance">Distance (km)</option>
+      </select>
+    </div>
+    <div class="field grow">
+      <label class="label" for="source">Source</label>
+      <input id="source" list="locations" autocomplete="off" placeholder="ID, list number or name">
+    </div>
+    <div class="field grow">
+      <label class="label" for="target">Destination</label>
+      <input id="target" list="locations" autocomplete="off" placeholder="ID, list number or name">
+    </div>
+    <button id="startBtn" class="primary" type="button">Start Visualization</button>
+    <datalist id="locations"></datalist>
+  </section>
+
+  <section class="card playback" aria-label="Playback controls">
+    <div class="btns">
+      <button id="restartBtn" type="button" title="Restart (R)">&#8635; Restart</button>
+      <button id="prevBtn" type="button" title="Previous step (&larr;)">&#9198; Prev</button>
+      <button id="playBtn" type="button" title="Play (Space)">&#9654; Play</button>
+      <button id="pauseBtn" type="button" title="Pause (Space)">&#9208; Pause</button>
+      <button id="nextBtn" type="button" title="Next step (&rarr;)">&#9197; Next Step</button>
+    </div>
+    <label class="speed">Animation speed
+      <span class="muted">Slow</span>
+      <input id="speed" type="range" min="1" max="10" value="5">
+      <span class="muted">Fast</span>
+    </label>
+    <label class="check"><input id="costLabels" type="checkbox"> Show costs on nodes</label>
+    <div class="btns">
+      <button id="fitBtn" type="button">Zoom to search</button>
+      <button id="fitAllBtn" type="button">Whole city</button>
+    </div>
+    <span class="muted hint">Keys: Space play/pause &middot; &rarr; next &middot; &larr; prev &middot; R restart &middot; scroll to zoom, drag to pan</span>
+  </section>
+
+  <div id="error" class="error" role="alert" hidden></div>
+
+  <section class="legend" aria-label="Legend">
+    <span><i class="dot source"></i>Source</span>
+    <span><i class="dot destination"></i>Destination</span>
+    <span><i class="dot current"></i>Current node</span>
+    <span><i class="dot unvisited"></i>Unvisited</span>
+    <span><i class="dot frontier"></i>Frontier (in priority queue)</span>
+    <span><i class="dot explored"></i>Explored (visited / closed)</span>
+    <span><i class="dot path"></i>Final path</span>
+    <span class="sep"></span>
+    <span><i class="ln normal"></i>Road</span>
+    <span><i class="ln explored"></i>Explored road</span>
+    <span><i class="ln current"></i>Road being relaxed</span>
+    <span><i class="ln path"></i>Final path road</span>
+    <span class="sep"></span>
+    <span><i class="dot big unvisited"></i>Society</span>
+    <span><i class="dot small unvisited"></i>Restaurant</span>
+  </section>
+
+  <main id="stage" class="stage single">
+    <div id="panels" class="panels">
+      <div class="card placeholder">Choose a source and destination, then press <b>Start Visualization</b>.</div>
+    </div>
+    <aside id="sidebar" class="sidebar">
+      <div class="card presenter">
+        <div class="step-no" id="stepNo">Step 0 / 0</div>
+        <div class="kv"><span>Current node</span><b id="curNode">&ndash;</b></div>
+        <div class="curname muted" id="curName"></div>
+        <h3>Action</h3>
+        <p id="action" class="action">&ndash;</p>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div class="card">
+        <h3 id="pqTitle">Priority queue (next to pop first)</h3>
+        <table class="pq" id="pqTable"></table>
+        <p class="muted small" id="pqNote"></p>
+      </div>
+      <div class="card small" id="heuristicNote"></div>
+    </aside>
+  </main>
+
+  <section id="results" class="results" hidden>
+    <div id="finalRoutes" class="final-routes"></div>
+    <div class="card" id="comparison"></div>
+  </section>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
